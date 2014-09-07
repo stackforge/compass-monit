@@ -1,0 +1,10 @@
+argparse
+flask
+flask-script
+flask-restful
+flask-sqlalchemy
+flask-login
+simplejson
+requests
+flask-wtf
+itsdangerous

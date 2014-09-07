@@ -1,59 +1,68 @@
-#!/usr/bin/env python
+# Copyright 2014 Huawei Technologies Co. Ltd
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-from flask import Flask
-from flask.ext import restful
-from flask.ext.restful import reqparse
-from flask.ext.jsonpify import jsonify
-#from flask import request
-from flask import redirect, request, current_app
+"""Define all the RestfulAPI entry points."""
+import logging
+import requests
+import random
+import simplejson as json
+import time
 import urllib
-import json 
-import requests 
-import random 
-import time 
 
+from flask.ext import restful
+from flask import redirect, request, current_app
 
-app = Flask(__name__)
+from compass_metrics.api import app
+
+from compass_metrics.utils import flags
+from compass_metrics.utils import logsetting
+from compass_metrics.utils import setting_wrapper as setting
 
 
 api = restful.Api(app)
 
-#class MyEncoder1(json.JSONEncoder):
-#    def default(self, obj):
 
+ROOT_URL = setting.ROOT_URL
 
-class HelloWorld(restful.Resource):
-    def get(self):
-        return {'warning': 'Please use /monit/api'}
-
-api.add_resource(HelloWorld, '/', '/monit')
 
 class HelloInfo(restful.Resource):
     def get(self):
-        #return {'info': 'Select host, hostgroup, topology, service from here'}
-        r = requests.get(ROOT_URL+"/api/v1/tagnames")
+        # return {'info': 'Select host, hostgroup, topology, service from here'}
+        url = ROOT_URL + '/api/v1/tagnames'
+        logging.debug('get url %s', url)
+        r = requests.get(url)
+        logging.debug('%s response: %s', request.path, r)
         return r.json()
 
-api.add_resource(HelloInfo, '/monit/api')
+
+api.add_resource(HelloInfo, '/')
+
 
 class Proxy(restful.Resource):
     def get(self, url):
         # Get URL Parameters for host and metric info
-        urlParam = request.url.split('proxy/', 9);
+        urlParam = request.url.split('proxy/', 9)
         my_url = urlParam[1]
-        #return my_url
-        r = requests.get(my_url, stream = True)
-        #return r.text
+        # return my_url
+        r = requests.get(my_url, stream=True)
+        # return r.text
         return json.loads(r.text)
-        #return Response(stream_with_context(r.iter_content()), content_type = r.headers['content-type'])
+        # return Response(stream_with_context(r.iter_content()), content_type = r.headers['content-type'])
 
-api.add_resource(Proxy, '/monit/api/proxy/<path:url>', defaults={'url': '/HelloWorld'})
 
-class InvalidUrl(restful.Resource):
-    def get(self):
-        return {'warning': 'Please form the URL'}
+api.add_resource(Proxy, '/proxy/<path:url>', defaults={'url': '/HelloWorld'})
 
-api.add_resource(InvalidUrl, '/monit')
 
 class Hosts(restful.Resource):
     def get(self):
@@ -62,7 +71,9 @@ class Hosts(restful.Resource):
 	# weed out just the hosts if possible
         return r.json()
 
-api.add_resource(Hosts, '/monit/api/hosts')
+
+api.add_resource(Hosts, '/hosts')
+
 
 class Metrics(restful.Resource):
     def get(self):
@@ -70,7 +81,9 @@ class Metrics(restful.Resource):
         r = requests.get(ROOT_URL +"/api/v1/metricnames")
         return r.json()
 
-api.add_resource(Metrics, '/monit/api/metrics')
+
+api.add_resource(Metrics, '/metrics')
+
 
 class TsGenerateAlarmData:
     def __init__(self):
@@ -125,7 +138,28 @@ class TsQueryBuilder:
 	self.statusStr = "failure"
         buildStr = '{ "metrics":['
 
-        repeatStr = '{"tags":{ "host":["HOSTNAME"]},"name":"METRIC","group_by":[{"name":"tag", "tags":["host"]}],"aggregators":[{"name":"sum", "align_sampling": false, "sampling":{ "value": "2", "unit": "minutes"}}]}'
+        repeatStr = json.dumps({
+            "tags": {
+                "host": ["HOSTNAME"]
+            },
+            "name": "METRIC",
+            "group_by": [
+                {
+                    "name":"tag",
+                    "tags": ["host"]
+                }
+            ],
+            "aggregators": [
+                {
+                    "name": "sum",
+                    "align_sampling": False,
+                    "sampling": {
+                        "value": "2",
+                        "unit": "minutes"
+                    }
+                }
+            ]
+        })
         finStr = '],"start_relative": { "value": "17", "unit": "minutes" }}' 
         repeatStr = repeatStr.replace("METRIC", metric)
 
@@ -143,6 +177,7 @@ class TsQueryBuilder:
         if  r.status_code  == requests.codes.ok:
 	    self.statusStr = "success"
         self.resp_dict = r.json()
+
 
 class HostMetric(restful.Resource):
     def get(self, hostname, metricname):
@@ -177,11 +212,13 @@ class HostMetric(restful.Resource):
         #return valStr
         return json.loads(valStr)
 
+
 api.add_resource(
     HostMetric, 
-    '/monit/api/host/<hostname>/metric/<metricname>', 
+    '/host/<hostname>/metric/<metricname>', 
     defaults={'hostname': '', 'metricname': ''}
 )
+
 
 class HostGroupMetric(restful.Resource):
     def get(self, hostgroup, metricname):
@@ -234,9 +271,10 @@ class HostGroupMetric(restful.Resource):
         #return valStr
         return json.loads(valStr)
 
+
 api.add_resource(
     HostGroupMetric, 
-    '/monit/api/hostgroup/<hostgroup>/metric/<metricname>', 
+    '/hostgroup/<hostgroup>/metric/<metricname>', 
     defaults={'hostgroup': '', 'metricname': ''}
 )
 
@@ -270,11 +308,13 @@ class RsHostMetric(restful.Resource):
 
         return json.loads(valStr)
 
+
 api.add_resource(
     RsHostMetric, 
-    '/monit/api/rshost/<hostname>/metric/<metricname>', 
+    '/rshost/<hostname>/metric/<metricname>', 
     defaults={'hostname': '', 'metricname': ''}
 )
+
 
 class RsHostGroupMetric(restful.Resource):
     def get(self, hostgroup, metricname):
@@ -333,7 +373,7 @@ class RsHostGroupMetric(restful.Resource):
 
 api.add_resource(
     RsHostGroupMetric, 
-    '/monit/api/rshostgroup/<hostgroup>/metric/<metricname>', 
+    '/rshostgroup/<hostgroup>/metric/<metricname>', 
     defaults={'hostgroup': '', 'metricname': ''}
 )
 
@@ -344,14 +384,18 @@ class Alarms(restful.Resource):
         #return r
         return json.loads("{"+r+"}")
 
-api.add_resource(Alarms, '/monit/api/alarms')
+
+api.add_resource(Alarms, '/alarms')
+
 
 class Services(restful.Resource):
     def get(self):
         r = requests.get(ROOT_URL +"/api/v1/services")
         return r.json()
 
-api.add_resource(Services, '/monit/api/services')
+
+api.add_resource(Services, '/services')
+
 
 class Topology(restful.Resource):
     def get(self):
@@ -364,14 +408,18 @@ class Topology(restful.Resource):
 
         #return valStr
 
-api.add_resource(Topology, '/monit/api/topologies/1')
+api.add_resource(Topology, '/topologies/1')
+
+
+def init():
+    pass
+
 
 if __name__ == '__main__':
-    global ROOT_URL
-    ROOT_URL = "http://10.145.81.205:8080"
+    flags.init()
+    logsetting.init()
+    init()
     app.run(host='0.0.0.0', debug=True, threaded=True)
-    #app.run(debug=True)
-
 
 
 """
