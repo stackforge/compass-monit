@@ -24,6 +24,19 @@ exlock_now || exit 1
 
 ### BEGIN OF SCRIPT ###
 DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+export SCRIPT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+export COMPASS_METTRICS_DIR=${SCRIPT_DIR}/..
+
+
+if [ ! -f "/etc/yum.repos.d/datastax.repo" ]; then
+    cp -rf ${COMPASS_METTRICS_DIR}/conf/datastax.repo /etc/yum.repos.d/datastax.repo
+fi
+
+if [ ! -f "/etc/yum.repos.d/datastax.repo" ]; then
+    echo "cannot find datastax repo"
+    exit 1
+fi
+
 
 ### Trap any error code with related filename and line.
 errtrap()
@@ -79,6 +92,7 @@ loadvars()
 }
 
 loadvars NIC "eth0"
+loadvars KAIROSDB_PORT "8080"
 sudo ifconfig $NIC
 if [ $? -ne 0 ]; then
     echo "There is no nic '$NIC' yet"
@@ -92,18 +106,29 @@ fi
 
 export ipaddr=$(ifconfig $NIC | grep 'inet addr:' | cut -d: -f2 | awk '{ print $1}')
 
-export SCRIPT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
-export COMPASS_METTRICS_DIR=${SCRIPT_DIR}/..
-
 echo 'Installing Required packages for Compass monit...'
 sudo yum clean all
 sudo yum update -y --skip-broken
 
-sudo yum install -y python python-devel git wget syslinux mod_wsgi httpd yum-utils python-virtualenv
+sudo yum install -y python python-devel git wget syslinux mod_wsgi httpd yum-utils python-virtualenv java-1.7.0-openjdk dsc20
 if [[ "$?" != "0" ]]; then
     echo "failed to install yum dependency"
     exit 1
 fi
+
+sudo rpm -q kairosdb
+if [[ "$?" != "0" ]]; then
+    sudo rpm -Uvh http://dl.bintray.com/brianhks/generic/kairosdb-0.9.3-2.rpm
+    if [[ "$?" != "0" ]]; then
+	echo "failed to install kairosdb"
+	exit 1
+    else:
+        echo "successfully installed kairosdb"
+    fi
+fi
+
+cp -rf ${COMPASS_METTRICS_DIR}/conf/kairos-carbon-1.0.jar /opt/kairosdb/lib/
+cp -rf ${COMPASS_METTRICS_DIR}/conf/kairosdb.properties /opt/kairosdb/conf/kairosdb.properties
 
 sudo easy_install --upgrade pip
 if [[ "$?" != "0" ]]; then
@@ -112,13 +137,17 @@ if [[ "$?" != "0" ]]; then
 fi
 
 sudo pip install virtualenvwrapper
+if [[ "$?" != "0" ]]; then
+    echo "failed to install pip dependency"
+    exit 1
+fi
 
 sudo chkconfig httpd on
 
 sudo mkdir -p /var/www/compass_monit
 sudo mkdir -p /var/log/compass_monit
 sudo mkdir -p /etc/compass_monit
-sudo 
+sudo chmod -R 777 /etc/compass_monit
 sudo chmod -R 777 /var/log/compass_monit
 
 
@@ -143,8 +172,27 @@ fi
 
 sudo sed -e 's|$PythonHome|'$VIRTUAL_ENV'|' -i /var/www/compass_monit/compass_monit.wsgi
 sudo sed -i "s/\$ipaddr/$ipaddr/g" /etc/compass_monit/setting
+sudo sed -i "s/\$kairosdb_port/$KAIROSDB_PORT/g" /opt/kairosdb/conf/kairosdb.properties
+sudo sed -i "s/\$kairosdb_port/$KAIROSDB_PORT/g" /etc/compass_monit/setting
 
 deactivate
+
+/opt/kairosdb/bin/kairosdb-service.sh restart
+if [[ "$?" != "0" ]]; then
+    echo "kairosdb is not started"
+    exit 1
+else
+    echo "kairosdb has already started"
+fi
+
+sudo service cassandra restart
+sudo service cassandra status
+if [[ "$?" != "0" ]]; then
+    echo "cassandra is not started"
+    exit 1
+else
+    echo "cassandra has already started"
+fi
 
 sudo service httpd restart
 sleep 10

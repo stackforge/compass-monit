@@ -1,4 +1,4 @@
 DEFAULT_LOGLEVEL = 'debug'
 DEFAULT_LOGDIR = '/var/log/compass_monit'
 WEB_LOGFILE = 'compass_monit.log'
-ROOT_URL = 'http://$ipaddr:8080'
+ROOT_URL = 'http://$ipaddr:$kairosdb_port'
