@@ -45,7 +45,6 @@ class HelloInfo(restful.Resource):
         logging.debug('%s response: %s', request.path, r)
         return r.json()
 
-
 api.add_resource(HelloInfo, '/')
 
 
@@ -60,7 +59,6 @@ class Proxy(restful.Resource):
         return json.loads(r.text)
         # return Response(stream_with_context(r.iter_content()), content_type = r.headers['content-type'])
 
-
 api.add_resource(Proxy, '/proxy/<path:url>', defaults={'url': '/HelloWorld'})
 
 
@@ -71,8 +69,16 @@ class Hosts(restful.Resource):
 	# weed out just the hosts if possible
         return r.json()
 
-
 api.add_resource(Hosts, '/hosts')
+
+
+lass MetricNames(restful.Resource):
+    def get(self):
+        # we need to tune this to host specific
+        r = requests.get(ROOT_URL +"/api/v1/metricnames")
+        return r.json()
+
+api.add_resource(MetricNames, '/metricnames')
 
 
 class Metrics(restful.Resource):
@@ -80,7 +86,6 @@ class Metrics(restful.Resource):
         # This is a comprehensive list of metrics not per host due to limitations
         r = requests.get(ROOT_URL +"/api/v1/metricnames")
         return r.json()
-
 
 api.add_resource(Metrics, '/metrics')
 
@@ -132,6 +137,18 @@ class TsGenerateAlarmData:
 	self.resultStr = buildStr + ']}]'
 
 
+class TsPostQuery:
+    def __init__(self, queryStr):
+        self.params = " "
+        self.statusStr = "failure"
+        jsqs = json.dumps(queryStr, ensure_ascii=False)
+        r = requests.post(ROOT_URL +"/api/v1/datapoints/query", data=jsqs)
+        # check the POST status and return success or fail here
+        if  r.status_code  == requests.codes.ok:
+            self.statusStr = "success"
+        self.resp_dict = r.json()
+
+
 class TsQueryBuilder:
     def __init__(self, host_s, metric):
 	self.params = " "
@@ -177,6 +194,24 @@ class TsQueryBuilder:
         if  r.status_code  == requests.codes.ok:
 	    self.statusStr = "success"
         self.resp_dict = r.json()
+
+
+class Datapoints(restful.Resource):
+    def post(self):
+        myReq =  request.get_json(force=True, silent=False, cache=False)
+        qb = TsPostQuery(myReq)
+        return qb.resp_dict
+
+api.add_resource(Datapoints, '/datapoints')
+
+
+class DatapointTags(restful.Resource):
+    def post(self):
+        myReq =  request.get_json(force=True, silent=False, cache=False)
+        qb = TsPostQuery(myReq)
+        return qb.resp_dict
+
+api.add_resource(DatapointTags, '/datapointtags')
 
 
 class HostMetric(restful.Resource):
@@ -377,13 +412,13 @@ api.add_resource(
     defaults={'hostgroup': '', 'metricname': ''}
 )
 
+
 class Alarms(restful.Resource):
     def get(self):
 	alarms = TsGenerateAlarmData()
         r = alarms.resultStr
         #return r
         return json.loads("{"+r+"}")
-
 
 api.add_resource(Alarms, '/alarms')
 
@@ -392,7 +427,6 @@ class Services(restful.Resource):
     def get(self):
         r = requests.get(ROOT_URL +"/api/v1/services")
         return r.json()
-
 
 api.add_resource(Services, '/services')
 
