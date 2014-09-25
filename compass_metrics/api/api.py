@@ -138,11 +138,11 @@ class TsGenerateAlarmData:
 
 
 class TsPostQuery:
-    def __init__(self, queryStr):
+    def __init__(self, queryUrl, queryStr):
         self.params = " "
         self.statusStr = "failure"
         jsqs = json.dumps(queryStr, ensure_ascii=False)
-        r = requests.post(ROOT_URL +"/api/v1/datapoints/query", data=jsqs)
+        r = requests.post(ROOT_URL + queryUrl, data=jsqs)
         # check the POST status and return success or fail here
         if  r.status_code  == requests.codes.ok:
             self.statusStr = "success"
@@ -199,7 +199,7 @@ class TsQueryBuilder:
 class Datapoints(restful.Resource):
     def post(self):
         myReq =  request.get_json(force=True, silent=False, cache=False)
-        qb = TsPostQuery(myReq)
+        qb = TsPostQuery("/api/v1/datapoints/query", myReq)
         return qb.resp_dict
 
 api.add_resource(Datapoints, '/datapoints')
@@ -208,7 +208,7 @@ api.add_resource(Datapoints, '/datapoints')
 class DatapointTags(restful.Resource):
     def post(self):
         myReq =  request.get_json(force=True, silent=False, cache=False)
-        qb = TsPostQuery(myReq)
+        qb = TsPostQuery("/api/v1/datapoints/query/tags", myReq)
         return qb.resp_dict
 
 api.add_resource(DatapointTags, '/datapointtags')
@@ -310,105 +310,6 @@ class HostGroupMetric(restful.Resource):
 api.add_resource(
     HostGroupMetric, 
     '/hostgroup/<hostgroup>/metric/<metricname>', 
-    defaults={'hostgroup': '', 'metricname': ''}
-)
-
-
-class RsHostMetric(restful.Resource):
-    def get(self, hostname, metricname):
-        # Get URL Parameters for host and metric info
-        urlParam = request.url.split('/', 9);
-        MyList = [urlParam[6]]
-
-        # Create and execute the query
-        qb = TsQueryBuilder(MyList, urlParam[8])
-
-        # Create JSON Prefix
-        valStr = '{"series":[{"metrics":[{"id":"' + urlParam[8] + '","data":['
-
-        # add all time series data
-        for key, value in qb.resp_dict["queries"][0]["results"][0]["values"]:
-            # round this value down
-            digits = str(key)
-            key = key - (int(digits[8]) * 10000)
-            key = key - (int(digits[9]) * 1000)
-            key = key - (int(digits[10]) * 100)
-            valStr += '{"time":' + str(key) + ',"value":' + str(value) + '},'
-
-        #remove a comma
-	valStr = valStr[:-1]
-
-        #add final braces
-	valStr += ']}],"id":"' + urlParam[6] + '"}],"status":"' + qb.statusStr + '"}'
-
-        return json.loads(valStr)
-
-
-api.add_resource(
-    RsHostMetric, 
-    '/rshost/<hostname>/metric/<metricname>', 
-    defaults={'hostname': '', 'metricname': ''}
-)
-
-
-class RsHostGroupMetric(restful.Resource):
-    def get(self, hostgroup, metricname):
-        # Get URL Parameters for host and metric info
-        urlParam = request.url.split('/', 9) #;
-        urlCruft = urlParam[8].split('?', 2) #;
-        hostgroup = urlParam[6]
-        themetric = urlCruft[0]
-
-        print themetric
-
-        # need logic to query hostgroup and convert to list
-        MyList = ["host1","host2","host3","host4","host5","host6"]
-
-        # Create and execute the query
-        qb = TsQueryBuilder(MyList, themetric)
-
-        # Create JSON Prefix
-        valStr = '['
-
-        #return qb.resp_dict
-
-        # add all time series data
-        i = 0
-        for host in MyList:
-            valStr += '{"name":"' + MyList[i] + ": " + themetric + '","data":['
-            for skey, svalue in qb.resp_dict["queries"][i]["results"][0]["values"]:
-               # round this value down
-               digits = str(skey)
-               skey = skey - (int(digits[8]) * 10000)
-               skey = skey - (int(digits[9]) * 1000)
-               skey = skey - (int(digits[10]) * 100)
-               valStr += '{"x":' + str(skey) + ',"y":' + str(svalue) + '},'
-
-            #remove a comma
-	    valStr = valStr[:-1]
-
-            #add final recordbraces
-	    valStr += ']},'
-
-            i += 1;
-
-        #remove a comma
-	valStr = valStr[:-1]
-
-        #add final braces
-	valStr += ']'
-
-        callback = request.args.get('callback', False)
-        if callback:
-            content = str(callback) + '(' + valStr + ')'
-            return current_app.response_class(content, mimetype='application/json')
-
-        #return valStr
-        return json.loads(valStr)
-
-api.add_resource(
-    RsHostGroupMetric, 
-    '/rshostgroup/<hostgroup>/metric/<metricname>', 
     defaults={'hostgroup': '', 'metricname': ''}
 )
 
