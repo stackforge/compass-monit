@@ -118,7 +118,8 @@ fi
 
 sudo rpm -q kairosdb
 if [[ "$?" != "0" ]]; then
-    sudo rpm -Uvh http://dl.bintray.com/brianhks/generic/kairosdb-0.9.3-2.rpm
+    ###sudo rpm -Uvh http://dl.bintray.com/brianhks/generic/kairosdb-0.9.3-2.rpm
+    sudo rpm -Uvh https://github.com/kairosdb/kairosdb/releases/download/v0.9.4/kairosdb-0.9.4-6.rpm
     if [[ "$?" != "0" ]]; then
 	echo "failed to install kairosdb"
 	exit 1
