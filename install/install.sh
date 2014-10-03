@@ -118,7 +118,8 @@ fi
 
 sudo rpm -q kairosdb
 if [[ "$?" != "0" ]]; then
-    sudo rpm -Uvh http://dl.bintray.com/brianhks/generic/kairosdb-0.9.3-2.rpm
+    #sudo rpm -Uvh http://dl.bintray.com/brianhks/generic/kairosdb-0.9.3-2.rpm
+    sudo rpm -Uvh https://github.com/kairosdb/kairosdb/releases/download/v0.9.4/kairosdb-0.9.4-6.rpm
     if [[ "$?" != "0" ]]; then
 	echo "failed to install kairosdb"
 	exit 1
@@ -177,14 +178,6 @@ sudo sed -i "s/\$kairosdb_port/$KAIROSDB_PORT/g" /etc/compass_monit/setting
 
 deactivate
 
-/opt/kairosdb/bin/kairosdb-service.sh restart
-if [[ "$?" != "0" ]]; then
-    echo "kairosdb is not started"
-    exit 1
-else
-    echo "kairosdb has already started"
-fi
-
 sudo service cassandra restart
 sudo service cassandra status
 if [[ "$?" != "0" ]]; then
@@ -192,6 +185,14 @@ if [[ "$?" != "0" ]]; then
     exit 1
 else
     echo "cassandra has already started"
+fi
+
+sudo /opt/kairosdb/bin/kairosdb-service.sh restart
+if [[ "$?" != "0" ]]; then
+    echo "kairosdb is not started"
+    exit 1
+else
+    echo "kairosdb has already started"
 fi
 
 sudo service httpd restart

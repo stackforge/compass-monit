@@ -20,6 +20,14 @@ import simplejson as json
 import time
 import urllib
 
+import httplib2
+#import json
+
+import os
+import re
+import time
+import sys
+
 from flask.ext import restful
 from flask import redirect, request, current_app
 
@@ -34,6 +42,79 @@ api = restful.Api(app)
 
 
 ROOT_URL = setting.ROOT_URL
+#KAIROS_URL = setting.KAIROS_URL
+
+
+
+import csv, itertools, json
+from pprint import pprint
+
+
+# Builds a unified tree for the enumerated metrics
+def apiLogin():
+    global token
+
+    if not token:
+        (resp, content) = h.request("http://"+ apihost + "/api/users/token",
+                  "POST", body="{\"email\" : \"admin@huawei.com\", \"password\" : \"admin\" }",
+                  headers={'Content-Type':'application/json'} )
+        #print "Response ="+str(resp)
+        #print "Content ="+content
+        data = json.loads(content)
+        token = data['token']
+        #print "Token ="+token
+
+
+# Builds a unified tree for the enumerated metrics
+def metricGather(rows):
+    result = []
+    global id
+    for key, group in itertools.groupby(rows, key=lambda r: r[0]):
+        group_rows = [row[1:] for row in group]
+        id = id + 1;
+
+        if len(group_rows[0]) == 2:
+            uid = str(id)
+            result.append({u"title": key, u"id": uid, u"nodes": [] })
+        else:
+            uid = str(id)
+            result.append({u"title": key, u"id": uid, u"nodes": metricGather(group_rows)})
+
+    return result
+
+# Builds a unified tree for the Physical Topology API
+def topoGather(rows):
+    result = []
+    global id
+    for key, group in itertools.groupby(rows, key=lambda r: r[0]):
+        group_rows = [row[1:] for row in group]
+        id = id + 1;
+        currentState = pingCheck(key)
+
+        if len(group_rows[0]) == 2:
+            result.append({u"name": key, u"state": currentState, u"children": [] })
+        else:
+            uid = str(id)
+            result.append({u"name": key, u"state": currentState, u"children": topoGather(group_rows)})
+
+    return result
+
+# Does a quick ping check to see if the host is available on ICMP
+def pingCheck(host_or_ip):
+    lifeline = re.compile(r"(\d) received")
+    report = ("Critical","Warning","Ok")
+
+    pingaling = os.popen("ping -q -c2 "+host_or_ip,"r")
+    #print ip," \n",
+    sys.stdout.flush()
+    while 1:
+        line = pingaling.readline()
+        if not line: break
+        igot = re.findall(lifeline,line)
+        if igot:
+            return report[int(igot[0])]
+    return "Unknown"
+
 
 
 class HelloInfo(restful.Resource):
@@ -63,14 +144,36 @@ api.add_resource(Proxy, '/proxy/<path:url>', defaults={'url': '/HelloWorld'})
 
 
 class Hosts(restful.Resource):
+    def get(self, clusterid):
+        apiLogin()
+        # Get URL Parameters for cluster
+        urlParam = request.url.split('/', 9);
+        clustername = urlParam[6]
+        (resp, content) = h.request("http://"+ apihost + "/api/clusters/"+ clustername + "/hosts", "GET", headers={'X-Auth-Token': token, 'Content-Type':'application/json'})
+        #print "Response ="+str(resp)
+        #print "Content ="+content
+        host_dict = json.loads(content)
+        s = "{'hosts': '[\'"
+
+        for i, v in enumerate(host_dict):
+            s += str(host_dict[i]['hostname']) + "\',\'"
+	s = s[:-3] # remove unneeded ,\'
+        s += "]'}"
+        return s.json()
+
+        #return {'hosts': '[\'host1\',\'host2\',\'host3\',\'host4\',\'host5\',\'host6\']'}
+
+api.add_resource(Hosts, '/clusters/<clusterid>/hosts',
+    defaults={'clusterid': '1'} )
+
+
+class MetricNames(restful.Resource):
     def get(self):
-        return {'hosts': '[\'host1\',\'host2\',\'host3\',\'host4\',\'host5\',\'host6\']'}
-        r = requests.get(ROOT_URL +"/api/v1/tagvalues")
-	# weed out just the hosts if possible
+        # we need to tune this to host specific
+        r = requests.get(ROOT_URL +"/api/v1/metricnames")
         return r.json()
 
-api.add_resource(Hosts, '/hosts')
-
+api.add_resource(MetricNames, '/metricnames')
 
 class MetricNames(restful.Resource):
     def get(self):
@@ -88,6 +191,31 @@ class Metrics(restful.Resource):
         return r.json()
 
 api.add_resource(Metrics, '/metrics')
+
+class MetricTree(restful.Resource):
+    def get(self):
+        # This is a comprehensive list of metrics not per host due to limitations
+        r = requests.get(ROOT_URL +"/api/v1/metricnames")
+        data = json.load(r)
+
+        s = '.nodes.\n'.join(data["results"])
+
+        s = s.replace(".value", " (value)")
+        s = s.replace(".rx", " (rx)")
+        s = s.replace(".tx", " (tx)")
+        s = s.replace(".read", " (read)")
+        s = s.replace(".write", " (write)")
+        s = s.replace(".free", " (free)")
+        s = s.replace(".used", " (used)")
+        #s.replace(".", ".node.")
+
+        rows = list(csv.reader(s.splitlines(), delimiter='.'))
+
+        r = metricGather(rows)
+        #return json.dumps(r)
+        return r.json()
+
+api.add_resource(MetricTree, '/metrictree')
 
 
 class TsGenerateAlarmData:
@@ -138,11 +266,12 @@ class TsGenerateAlarmData:
 
 
 class TsPostQuery:
-    def __init__(self, queryStr):
+    def __init__(self, queryUrl, queryStr):
         self.params = " "
         self.statusStr = "failure"
         jsqs = json.dumps(queryStr, ensure_ascii=False)
-        r = requests.post(ROOT_URL +"/api/v1/datapoints/query", data=jsqs)
+        print "start posting:  " + ROOT_URL + queryUrl
+        r = requests.post(ROOT_URL + queryUrl, data=jsqs)
         # check the POST status and return success or fail here
         if  r.status_code  == requests.codes.ok:
             self.statusStr = "success"
@@ -197,31 +326,34 @@ class TsQueryBuilder:
 
 
 class Datapoints(restful.Resource):
-    def post(self):
+    def post(self, clusterid):
         myReq =  request.get_json(force=True, silent=False, cache=False)
-        qb = TsPostQuery(myReq)
+        #print "posting datapoints"
+        qb = TsPostQuery("/api/v1/datapoints/query", myReq)
         return qb.resp_dict
 
-api.add_resource(Datapoints, '/datapoints')
+api.add_resource(Datapoints, '/clusters/<clusterid>/datapoints',
+    defaults={'clusterid': '1'} )
 
 
 class DatapointTags(restful.Resource):
-    def post(self):
+    def post(self, clusterid):
         myReq =  request.get_json(force=True, silent=False, cache=False)
-        qb = TsPostQuery(myReq)
+        qb = TsPostQuery("/api/v1/datapoints/query/tags", myReq)
         return qb.resp_dict
 
-api.add_resource(DatapointTags, '/datapointtags')
+api.add_resource(DatapointTags, '/clusters/<clusterid>/datapointtags',
+    defaults={'clusterid': '1'} )
 
 
 class HostMetric(restful.Resource):
-    def get(self, hostname, metricname):
+    def get(self, clusterid, hostname, metricname):
         # Get URL Parameters for host and metric info
-        urlParam = request.url.split('/', 9);
-        MyList = [urlParam[6]]
+        urlParam = request.url.split('/', 11);
+        MyList = [urlParam[8]]
 
         # Create and execute the query
-        qb = TsQueryBuilder(MyList, urlParam[8])
+        qb = TsQueryBuilder(MyList, urlParam[10])
 
         # Create JSON Prefix
         valStr = '{"result":[{"metrics":[{"id":"' + urlParam[8] + '","data":['
@@ -242,7 +374,7 @@ class HostMetric(restful.Resource):
         #add final braces
 	valStr += ']}],'
 	valStr += a.resultStr
-	valStr += ',"id":"' + urlParam[6] + '"}],"status":"' + qb.statusStr + '"}'
+	valStr += ',"id":"' + urlParam[8] + '"}],"status":"' + qb.statusStr + '"}'
 
         #return valStr
         return json.loads(valStr)
@@ -250,22 +382,22 @@ class HostMetric(restful.Resource):
 
 api.add_resource(
     HostMetric, 
-    '/host/<hostname>/metric/<metricname>', 
-    defaults={'hostname': '', 'metricname': ''}
+    '/clusters/<clusterid>/host/<hostname>/metric/<metricname>', 
+    defaults={'clusterid': '1', 'hostname': '', 'metricname': ''}
 )
 
 
 class HostGroupMetric(restful.Resource):
-    def get(self, hostgroup, metricname):
+    def get(self, clusterid, hostgroup, metricname):
         # Get URL Parameters for host and metric info
-        urlParam = request.url.split('/', 9);
-        hostgroup = urlParam[6]
+        urlParam = request.url.split('/', 11);
+        hostgroup = urlParam[8]
 
         # need logic to query hostgroup and convert to list
         MyList = ["host1","host2","host3","host4","host5","host6"]
 
         # Create and execute the query
-        qb = TsQueryBuilder(MyList, urlParam[8])
+        qb = TsQueryBuilder(MyList, urlParam[10])
 
         # Create JSON Prefix
         valStr = '{"result":['
@@ -309,140 +441,61 @@ class HostGroupMetric(restful.Resource):
 
 api.add_resource(
     HostGroupMetric, 
-    '/hostgroup/<hostgroup>/metric/<metricname>', 
-    defaults={'hostgroup': '', 'metricname': ''}
-)
-
-
-class RsHostMetric(restful.Resource):
-    def get(self, hostname, metricname):
-        # Get URL Parameters for host and metric info
-        urlParam = request.url.split('/', 9);
-        MyList = [urlParam[6]]
-
-        # Create and execute the query
-        qb = TsQueryBuilder(MyList, urlParam[8])
-
-        # Create JSON Prefix
-        valStr = '{"series":[{"metrics":[{"id":"' + urlParam[8] + '","data":['
-
-        # add all time series data
-        for key, value in qb.resp_dict["queries"][0]["results"][0]["values"]:
-            # round this value down
-            digits = str(key)
-            key = key - (int(digits[8]) * 10000)
-            key = key - (int(digits[9]) * 1000)
-            key = key - (int(digits[10]) * 100)
-            valStr += '{"time":' + str(key) + ',"value":' + str(value) + '},'
-
-        #remove a comma
-	valStr = valStr[:-1]
-
-        #add final braces
-	valStr += ']}],"id":"' + urlParam[6] + '"}],"status":"' + qb.statusStr + '"}'
-
-        return json.loads(valStr)
-
-
-api.add_resource(
-    RsHostMetric, 
-    '/rshost/<hostname>/metric/<metricname>', 
-    defaults={'hostname': '', 'metricname': ''}
-)
-
-
-class RsHostGroupMetric(restful.Resource):
-    def get(self, hostgroup, metricname):
-        # Get URL Parameters for host and metric info
-        urlParam = request.url.split('/', 9) #;
-        urlCruft = urlParam[8].split('?', 2) #;
-        hostgroup = urlParam[6]
-        themetric = urlCruft[0]
-
-        print themetric
-
-        # need logic to query hostgroup and convert to list
-        MyList = ["host1","host2","host3","host4","host5","host6"]
-
-        # Create and execute the query
-        qb = TsQueryBuilder(MyList, themetric)
-
-        # Create JSON Prefix
-        valStr = '['
-
-        #return qb.resp_dict
-
-        # add all time series data
-        i = 0
-        for host in MyList:
-            valStr += '{"name":"' + MyList[i] + ": " + themetric + '","data":['
-            for skey, svalue in qb.resp_dict["queries"][i]["results"][0]["values"]:
-               # round this value down
-               digits = str(skey)
-               skey = skey - (int(digits[8]) * 10000)
-               skey = skey - (int(digits[9]) * 1000)
-               skey = skey - (int(digits[10]) * 100)
-               valStr += '{"x":' + str(skey) + ',"y":' + str(svalue) + '},'
-
-            #remove a comma
-	    valStr = valStr[:-1]
-
-            #add final recordbraces
-	    valStr += ']},'
-
-            i += 1;
-
-        #remove a comma
-	valStr = valStr[:-1]
-
-        #add final braces
-	valStr += ']'
-
-        callback = request.args.get('callback', False)
-        if callback:
-            content = str(callback) + '(' + valStr + ')'
-            return current_app.response_class(content, mimetype='application/json')
-
-        #return valStr
-        return json.loads(valStr)
-
-api.add_resource(
-    RsHostGroupMetric, 
-    '/rshostgroup/<hostgroup>/metric/<metricname>', 
-    defaults={'hostgroup': '', 'metricname': ''}
+    '/clusters/<clusterid>/hostgroup/<hostgroup>/metric/<metricname>', 
+    defaults={'clusterid': '1', 'hostname': '', 'metricname': ''}
 )
 
 
 class Alarms(restful.Resource):
-    def get(self):
+    def get(self, clusterid):
 	alarms = TsGenerateAlarmData()
         r = alarms.resultStr
         #return r
         return json.loads("{"+r+"}")
 
-api.add_resource(Alarms, '/alarms')
+api.add_resource(Alarms, '/clusters/<clusterid>/alarms',
+    defaults={'clusterid': '1'} )
 
 
 class Services(restful.Resource):
-    def get(self):
+    def get(self, clusterid):
         r = requests.get(ROOT_URL +"/api/v1/services")
         return r.json()
 
-api.add_resource(Services, '/services')
+api.add_resource(Services, '/clusters/<clusterid>/services',
+    defaults={'clusterid': '1'} )
+
 
 
 class Topology(restful.Resource):
     def get(self):
+        apiLogin()
+        # Get URL Parameters for cluster
+        urlParam = request.url.split('/', 9);
+        clustername = urlParam[6]
+        (resp, content) = h.request("http://"+ apihost + "/api/clusters/"+ clustername + "/hosts", "GET", headers={'X-Auth-Token': token, 'Content-Type':'application/json'})
+        #print "Response ="+str(resp)
+        #print "Content ="+content
+        host_dict = json.loads(content)
+        s = ""
+
+        for i, v in enumerate(host_dict):
+            s = str(host_dict[i]['os_installer']['settings']['cobbler_url'].split('/')[2]) + "," + str(host_dict[i]['switch_ip']) + "," + str(host_dict[i]['hostname']) + "\n"
+            rows = list(csv.reader(s.splitlines()))
+            r = gatherify(rows)
+            return json.dumps(r)
+
+
+class ServiceTopology(restful.Resource):
+    def get(self, clusterid):
         #r = requests.get(ROOT_URL +"/api/v1/topology")
         #return r.json()
-        valAStr = '{"status":"success", "result":[ {"id":"uc-datacenter","name":"uc-datacenter","children":[ {"id":"nova-compute","name":"nova-compute","state":"running","resource":"services","type":"service","children":[ {"id":"compute-server-1.huawei.com","name":"compute-server-1.huawei.com","state":"running","resource":"hosts","type":"server", "children":[ {"id":"nova-compute","name":"nova-compute","state":"running","resource":"services","type":"service","children":[]}, {"id":"nova-consoleauth","name":"nova-consoleauth","state":"running","resource":"services","type":"service","children":[]} ]}, {"id":"compute-server-2.huawei.com","name":"compute-server-2.huawei.com","state":"running","resource":"hosts","type":"server", "children":[ {"id":"nova-novncproxy","name":"nova-novncproxy","state":"running","resource":"services","type":"service","children":[]}, {"id":"ceilometer-agent-compute","name":"ceilometer-agent-compute","state":"running","resource":"services","type":"service","children":[]}, {"id":"neutron-openvswitch-agent","name":"nova-openvswitch-agent","state":"running","resource":"services","type":"service","children":[]} ]} ]} ]} ]}'
 
         valStr = '{"status":"success", "result":[{"id":"Huawei-Lab-C","name":"Huawei-Lab-C","children":[ {"id":"10.145.81.219","name":"10.145.81.219","state":"warning","resource":"services","type":"service","children":[ {"name":"server-1.huawei.com","id":"host1.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-2.huawei.com","id":"host2.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-3.huawei.com","id":"host3.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-4.huawei.com","id":"host4.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-5.huawei.com","id":"host5.huawei.com","state":"warning","resource":"hosts","type":"server", "children":[]}, {"name":"server-6.huawei.com","id":"host6.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-7.huawei.com","id":"host7.huawei.com","state":"critical","resource":"hosts","type":"server", "children":[]}, {"name":"monit-server-1.huawei.com","id":"10_145_81_205","state":"running","resource":"hosts","type":"server", "children":[]}]}]}]}'
         return json.loads(valStr)
 
-        #return valStr
-
-api.add_resource(Topology, '/topologies/1')
+api.add_resource(ServiceTopology, '/clusters/<clusterid>/servicetopology',
+    defaults={'clusterid': '1'} )
 
 
 def init():

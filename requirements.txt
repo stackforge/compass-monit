@@ -6,5 +6,7 @@ flask-sqlalchemy
 flask-login
 simplejson
 requests
+httplib2
+elasticsearch
 flask-wtf
 itsdangerous
