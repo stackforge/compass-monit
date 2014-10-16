@@ -5,6 +5,8 @@ flask-restful
 flask-sqlalchemy
 flask-login
 simplejson
+httplib2
+elasticsearch
 requests
 httplib2
 elasticsearch
