@@ -93,6 +93,7 @@ loadvars()
 
 loadvars NIC "eth0"
 loadvars KAIROSDB_PORT "8080"
+loadvars MONITOR_NODE_IP "10.1.1.1"
 sudo ifconfig $NIC
 if [ $? -ne 0 ]; then
     echo "There is no nic '$NIC' yet"
@@ -171,10 +172,15 @@ else
     echo "compass-monit package is installed in virtualenv under current dir"
 fi
 
+## NOTE: This will code change if chef installs this piece
+#  We will have to support monitor node install seperate from compass
+#  For now these variable are included for that purpose and testing
+#
 sudo sed -e 's|$PythonHome|'$VIRTUAL_ENV'|' -i /var/www/compass_monit/compass_monit.wsgi
 sudo sed -i "s/\$ipaddr/$ipaddr/g" /etc/compass_monit/setting
 sudo sed -i "s/\$kairosdb_port/$KAIROSDB_PORT/g" /opt/kairosdb/conf/kairosdb.properties
 sudo sed -i "s/\$kairosdb_port/$KAIROSDB_PORT/g" /etc/compass_monit/setting
+sudo sed -i "s/\$monitor_ipaddr/$MONITOR_NODE_IP/g" /etc/compass_monit/setting
 
 deactivate
 

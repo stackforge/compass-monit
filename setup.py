@@ -99,5 +99,5 @@ setup(
     ],
     # test,
     tests_require=['tox'],
-    cmdclass={'test': Tox},
+    cmdclass={'test': Tox }
 )
