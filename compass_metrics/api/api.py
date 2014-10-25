@@ -35,6 +35,7 @@ from datetime import timedelta
 #from flask import Flask
 
 from flask.ext import restful
+
 from flask import redirect, request, current_app, jsonify
 import csv, itertools, json
 from pprint import pprint
@@ -45,6 +46,8 @@ from compass_metrics.utils import flags
 from compass_metrics.utils import logsetting
 from compass_metrics.utils import setting_wrapper as setting
 
+
+## Globals
 
 ## Comment out this line for standalone testing
 #app = Flask(__name__)
@@ -60,17 +63,25 @@ MONITOR_IP = setting.MONITOR_IP
 ## Hardcode this line for standalone testing
 KAIROS_URL = setting.KAIROS_URL
 #KAIROS_URL = "http://10.1.4.71:8080"
-#KAIROS_URL = "http://10.145.89.165:8088"
+#KAIROS_URL = "http://10.145.89.16:8088"
 
 ## Hardcode this line for standalone testing
 COMPASS_IP = setting.COMPASS_IP
 #COMPASS_IP = "10.1.4.70"
-#COMPASS_IP = "10.145.89.165"
-
+#COMPASS_IP = "10.145.89.16"
 
 # Login token - long lived so it's global
 token = None
 tokenTs = None
+
+# A dictionary for upto 10 clusters
+compass_dict = [None]*10
+
+# A dictionary for upto 10 clusters
+metricsList = None
+metricsTree = None
+
+## End Globals
 
 
 # Support routines
@@ -79,23 +90,50 @@ tokenTs = None
 def apiLogin():
     global token
     global tokenTs
+    global compass_dict
 
     if tokenTs != None:
         delta_time = datetime.now() - tokenTs
-        #print "Timeout: " + str(delta_time.seconds)
+        #print "Exipration: " + str(delta_time.seconds)
         if delta_time.seconds > 50*60:
+            print "Regen token " + str(delta_time.seconds)
             token = None
+    else:
+        print "New token"
+        compass_dict = [None]*10
+        metricsList = None
+        metricsTree = None
 
     if token == None:
-        (resp, content) = webl.request("http://"+ COMPASS_IP + "/api/users/token",
-                  "POST", body="{\"email\" : \"admin@huawei.com\", \"password\" : \"admin\" }",
-                  headers={'Content-Type':'application/json'} )
-        #print "Response ="+str(resp)
-        #print "Content ="+content
+        my_uri = "http://"+ COMPASS_IP + "/api/users/token"
+        #my_method = 'method="POST"'
+        my_method = "POST"
+        my_body = "{\"email\" : \"admin@huawei.com\", \"password\" : \"admin\" }"
+        my_headers = {'Content-Type':'application/json'}
+        print "Compass request: "+my_uri+" "+my_method+" "+my_body+" "+str(my_headers)
+        (resp, content) = webl.request(my_uri, method=my_method, body=my_body, headers=my_headers)
+        print "Response: "+str(resp)
+        #print "Content: "+content
         data = json.loads(content)
         token = data['token']
         tokenTs = datetime.now()
 
+
+def clusterData(clusterid):
+    global compass_dict
+    clusterid = int(clusterid)
+    if compass_dict[clusterid] == None:
+        clusteridname = str(clusterid)
+        my_uri = "http://"+ COMPASS_IP + "/api/clusters/"+ clusteridname + "/hosts"
+        my_body = ""
+        my_method = "GET"
+        my_headers = {'X-Auth-Token': token, 'Content-Type':'application/json'}
+        print "Compass request: "+my_uri+" "+my_method+" "+my_body+" "+str(my_headers)
+        (resp, content) = webl.request(my_uri, method=my_method, headers=my_headers)
+        print "Response: "+str(resp)
+        #print "Content: "+content
+        compass_dict[clusterid] = json.loads(content)
+    return compass_dict[clusterid]
 
 
 # Finds the IP address on the management network for a node
@@ -122,19 +160,21 @@ def metricGather(rows, title_root):
         s = s.replace(" (used)", ".used")
 
         if len(group_rows[0]) == 2:
-            if title_root != None:
-                uid = title_root+'.'+s
-            else:
-                uid = s
-            result.append({u"title": key, u"id": uid, u"nodes": [] })
+#            if title_root != None:
+#                uid = title_root+'.'+s
+#            else:
+#                uid = s
+#            result.append({u"title": key, u"id": uid, u"nodes": [] })
+            result.append({u"title": key, u"nodes": [] })
         elif len(group_rows[0]) < 2:
             continue
         else:
-            if title_root != None:
-                uid = title_root+'.'+s
-            else:
-                uid = s
-            result.append({u"title": key, u"id": uid, u"nodes": metricGather(group_rows, uid)})
+#            if title_root != None:
+#                uid = title_root+'.'+s
+#            else:
+#                uid = s
+#            result.append({u"title": key, u"id": uid, u"nodes": metricGather(group_rows, uid)})
+            result.append({u"title": key, u"nodes": metricGather(group_rows, None)})
 
     return result
 
@@ -200,7 +240,6 @@ def pingCheck(host_or_ip):
     return "unknown"
 
 
-
 class HelloInfo(restful.Resource):
     def get(self):
         # return {'info': 'Select host, hostgroup, topology, service from here'}
@@ -229,12 +268,10 @@ api.add_resource(Proxy, '/proxy/<path:url>') #, defaults={'url': '/HelloWorld'})
 
 class Hosts(restful.Resource):
     def get(self, clusterid):
+        """This returns a JSON Host list structure."""
         apiLogin()
-        clustername = str(clusterid)
-        (resp, content) = webl.request("http://"+ COMPASS_IP + "/api/clusters/"+ clustername + "/hosts", "GET", headers={'X-Auth-Token': token, 'Content-Type':'application/json'})
-        #print "Response ="+str(resp)
-        #print "Content ="+content
-        host_dict = json.loads(content)
+        host_dict = clusterData(clusterid)
+
         s = "{\"hosts\": [\""
 
         for i, v in enumerate(host_dict):
@@ -245,16 +282,21 @@ class Hosts(restful.Resource):
         #return s.json()
         return json.loads(s)
 
-api.add_resource(Hosts, '/clusters/<clusterid>/hosts'
+api.add_resource(Hosts, '/clusters/<int:clusterid>/hosts'
     #, defaults={'clusterid': '1'} )
 )
 
 
 class MetricNames(restful.Resource):
     def get(self):
+        global metricsList
+        """ Returns a list of collected metric names."""
         # we need to tune this to host specific
-        req = requests.get(KAIROS_URL +"/api/v1/metricnames")
-        names_dict = req.json()
+        if metricsList == None:
+            # This is a comprehensive list of metrics not per host due to limitations
+            req = requests.get(KAIROS_URL +"/api/v1/metricnames")
+            metricsList = req
+        names_dict = metricsList.json()
         return names_dict["results"]
 
 api.add_resource(MetricNames, '/metricnames')
@@ -262,36 +304,51 @@ api.add_resource(MetricNames, '/metricnames')
 
 class Metrics(restful.Resource):
     def get(self):
-        # This is a comprehensive list of metrics not per host due to limitations
-        r = requests.get(KAIROS_URL +"/api/v1/metricnames")
-        return r.json()
+        global metricsList
+        if metricsList == None:
+            # This is a comprehensive list of metrics not per host due to limitations
+            metricsList = requests.get(KAIROS_URL +"/api/v1/metricnames")
+        return metricsList.json()
 
 api.add_resource(Metrics, '/metrics')
 
 
+class DeleteMetric(restful.Resource):
+    def get(self, metricname):
+        resp = requests.delete(KAIROS_URL +"/api/v1/metric/"+metricname)
+        #return json(resp)
+        return
+
+api.add_resource(DeleteMetric, '/deletemetric/<string:metricname>')
+
+
 class MetricTree(restful.Resource):
     def get(self):
-        # This is a comprehensive list of metrics not per host due to limitations
-        req = requests.get(KAIROS_URL +"/api/v1/metricnames")
+        global metricsList
+        global metricsTree
+        if metricsList == None:
+            # This is a comprehensive list of metrics not per host due to limitations
+            metricsList = requests.get(KAIROS_URL +"/api/v1/metricnames")
 
-        names_dict = req.json()
+        if metricsTree == None:
+            names_dict = metricsList.json()
+            # Compress some of the leafnodes of the tree for usability
+            s = '.nodes.\n'.join(names_dict["results"])
 
-        s = '.nodes.\n'.join(names_dict["results"])
+            s = s.replace(".value", " (value)")
+            s = s.replace(".rx", " (rx)")
+            s = s.replace(".tx", " (tx)")
+            s = s.replace(".read", " (read)")
+            s = s.replace(".write", " (write)")
+            s = s.replace(".free", " (free)")
+            s = s.replace(".used", " (used)")
 
-        s = s.replace(".value", " (value)")
-        s = s.replace(".rx", " (rx)")
-        s = s.replace(".tx", " (tx)")
-        s = s.replace(".read", " (read)")
-        s = s.replace(".write", " (write)")
-        s = s.replace(".free", " (free)")
-        s = s.replace(".used", " (used)")
-        #s.replace(".", ".node.")
+            rows = list(csv.reader(s.splitlines(), delimiter='.'))
+            metricsTree = metricGather(rows, None)
 
-        rows = list(csv.reader(s.splitlines(), delimiter='.'))
-        rws = metricGather(rows, None)
-        return rws
-        #return json.dumps(rws)
-        #return rws.json()
+        return metricsTree
+        #return json.dumps(metricsTree)
+        #return metricsTree.json()
 
 api.add_resource(MetricTree, '/metrictree')
 
@@ -304,7 +361,7 @@ class TsGenerateAlarmData:
         report = ("ok", "warning", "critical", "unknown")
 	buildStr = '['
 
-        #print str(elements)
+        print str(elements)
         for h in range(0, 4):
             for j in range(1, 30):
                 elementid = random.randint(0,len(elements)-1)
@@ -333,14 +390,17 @@ class TsPostQuery:
 
 
 class TsQueryBuilder:
-    def __init__(self, clustername, host_s, metric, multi):
+    def __init__(self, clusteridname, host_s, metric, multi):
 	self.params = " "
 	self.statusStr = "failure"
+        self.resp_dict = None
+
         buildStr = '{ "metrics":['
-        repeatStr = '{ "tags": { "cluster": [ "CLUSTERID" ], "host": [ "HOSTNAME" ] }, "name": "METRIC", "group_by": [ { "name":"tag", "tags": ["host"] } ], "aggregators": [{ "name": "avg", "align_sampling": True, "sampling": { "value": "1", "unit": "seconds" } }] }'
+        ###repeatStr = '{ "tags": { "cluster": [ "CLUSTERID" ], "host": [ "HOSTNAME" ] }, "name": "METRIC", "group_by": [ { "name":"tag", "tags": ["host"] } ], "aggregators": [{ "name": "avg", "align_sampling": true, "sampling": { "value": "1", "unit": "seconds" } }] }'
+        repeatStr = '{ "tags": {}, "name": "METRIC", "group_by": [ { "name":"tag", "tags": ["host"] } ], "aggregators": [{ "name": "avg", "align_sampling": true, "sampling": { "value": "1", "unit": "seconds" } }] }'
 
         finStr = '],"cache_time": 1, "start_relative": { "value": "1", "unit": "months" } }'
-        repeatStr = repeatStr.replace("METRIC", metric).replace("CLUSTERID", clustername)
+        repeatStr = repeatStr.replace("METRIC", metric).replace("CLUSTERID", clusteridname)
 
         if multi == True:
             i = len(host_s);
@@ -350,9 +410,11 @@ class TsQueryBuilder:
                 if i != 0:
                     buildStr += ','
         elif host_s == None:
-            #print "Host: None"
-            repeatStr = repeatStr.replace('"group_by": [ { "name":"tag", "tags": ["host"] } ],',' ')
-            buildStr += repeatStr.replace(', "host": [ "HOSTNAME" ]', ' ')
+            print "Host: None"
+            ###repeatStr = repeatStr.replace('"group_by": [ { "name":"tag", "tags": ["host"] } ],',' ')
+            ###buildStr += repeatStr.replace(', "host": [ "HOSTNAME" ]', ' ')
+            buildStr += repeatStr ### remove this later
+            print "Build: " + buildStr
         else:
             buildStr += repeatStr.replace("HOSTNAME", host_s)
 
@@ -363,29 +425,31 @@ class TsQueryBuilder:
         # check the POST status and return success or fail here
         if  r.status_code  == requests.codes.ok:
 	    self.statusStr = "success"
-        self.resp_dict = r.json()
-        #print "Result: " + str(r.json)
+            self.resp_dict = r.json()
+            print "Result: " + str(r.json)
 
 
 class Datapoints(restful.Resource):
     def post(self, clusterid):
-        clustername = str(clusterid)
+        clusteridname = str(clusterid)
         myReq =  request.get_json(force=True, silent=False, cache=False)
         #print "posting datapoints"
         qb = TsPostQuery("/api/v1/datapoints/query", myReq)
-        return qb.resp_dict
+        if qb.resp_dict != None:
+            return qb.resp_dict
 
-api.add_resource(Datapoints, '/clusters/<clusterid>/datapoints')
+api.add_resource(Datapoints, '/clusters/<int:clusterid>/datapoints')
 
 
 class DatapointTags(restful.Resource):
     def post(self, clusterid):
-        clustername = str(clusterid)
+        clusteridname = str(clusterid)
         myReq =  request.get_json(force=True, silent=False, cache=False)
         qb = TsPostQuery("/api/v1/datapoints/query/tags", myReq)
-        return qb.resp_dict
+        if qb.resp_dict != None:
+            return qb.resp_dict
 
-api.add_resource(DatapointTags, '/clusters/<clusterid>/datapointtags')
+api.add_resource(DatapointTags, '/clusters/<int:clusterid>/datapointtags')
 
 
 class ClusterMetric(restful.Resource):
@@ -394,12 +458,14 @@ class ClusterMetric(restful.Resource):
 
         # Create and execute the query
         qb = TsQueryBuilder(clusteridname, None, metricname, False)
+        if qb.resp_dict == None:
+            return ""
+
         resultStr = str(qb.resp_dict['queries'][0]['results'][0]['values'])
 
         #print "Z res: "+str(qb.resp_dict['queries'][0]['results'][0])
 
         # Create JSON Prefix
-        #valStr = '{"result":[{"metrics":[{"id":"' + clustername + '","data":['
         valStr = '{ "clusterid": "' + clusteridname + '", "key": "' + metricname + '", "values":'
 	valStr += resultStr
 
@@ -424,45 +490,35 @@ class ClusterMetric(restful.Resource):
 	valStr = valStr[:-1]
 """
 
-
-
-
 api.add_resource(
     ClusterMetric,
     '/clusters/<int:clusterid>/metrics/<string:metricname>'
     #, defaults={'clusterid': '1', 'hostname': 'test-controller', 'metricname': 'load.load.shortterm'}
 )
 
+
 class HostMetric(restful.Resource):
     def get(self, clusterid, hostname, metricname):
-        clustername = str(clusterid)
+        clusteridname = str(clusterid)
 
         # Create and execute the query
-        qb = TsQueryBuilder(clustername, hostname, metricname, False)
+        qb = TsQueryBuilder(clusteridname, hostname, metricname, False)
+        if qb.resp_dict == None:
+            return ""
+        resultStr = str(qb.resp_dict['queries'][0]['results'][0]['values'])
+
+        #print "Z res: "+str(qb.resp_dict['queries'][0]['results'][0])
 
         # Create JSON Prefix
-        valStr = '{"result":[{"metrics":[{"id":"' + hostname + '","data":['
+        valStr = '{ "clusterid": "' + clusteridname + '", "host": "' + hostname + '", "key": "' + metricname + '", "values":'
+	valStr += resultStr
 
-        #  add all time series data
-        for key, value in qb.resp_dict["queries"][0]["results"][0]["values"]:
-            # round this value down
-            digits = str(key)
-            key = key - (int(digits[8]) * 10000)
-            key = key - (int(digits[9]) * 1000)
-            key = key - (int(digits[10]) * 100)
-            valStr += '{"time":' + str(key) + ',"value":' + str(value) + '},'
-
-        #remove a comma
-	valStr = valStr[:-1]
-
-	#a = TsGenerateAlarmData()
         #add final braces
-	valStr += ']}],'
-	#valStr += a.resultStr
-	valStr += ',"id":"' + hostname + '"}],"status":"' + qb.statusStr + '"}'
+	valStr += '}'
 
-        return valStr
-        #return json.loads(valStr)
+        #return valStr
+        #return json.dumps(valStr)
+        return json.loads(valStr)
 
 
 api.add_resource(
@@ -481,6 +537,8 @@ class HostGroupMetric(restful.Resource):
 
         # Create and execute the query
         qb = TsQueryBuilder(clusteridname, MyList, metricname, True)
+        if qb.resp_dict == None:
+            return ""
 
         # Create JSON Prefix
         valStr = '{"result":['
@@ -524,7 +582,7 @@ class HostGroupMetric(restful.Resource):
 
 api.add_resource(
     HostGroupMetric,
-    '/clusters/<clusterid>/hostgroups/<hostgroup>/metrics/<metricname>'
+    '/clusters/<int:clusterid>/hostgroups/<string:hostgroup>/metrics/<string:metricname>'
     #,defaults={'clusterid': '1', 'hostname': '', 'metricname': ''}
 )
 
@@ -533,10 +591,7 @@ class Alarms(restful.Resource):
     def get(self, clusterid):
         apiLogin()
         elements = []
-        clusteridname = str(clusterid)
-        (resp, content) = webl.request("http://"+ COMPASS_IP + "/api/clusters/"+ clusteridname + "/hosts", "GET", headers={'X-Auth-Token': token, 'Content-Type':'application/json'})
-        host_dict = json.loads(content)
-
+        host_dict = clusterData(clusterid)
 
         for i, v in enumerate(host_dict):
 	    elements.append(host_dict[i]['hostname'])
@@ -547,8 +602,8 @@ class Alarms(restful.Resource):
         #return r
         return json.loads(r)
 
-api.add_resource(Alarms, '/clusters/<clusterid>/alarms'
-    #, defaults={'clusterid': '1'} 
+api.add_resource(Alarms, '/clusters/<int:clusterid>/alarms'
+    #, defaults={'clusterid': '1'}
 )
 
 
@@ -559,7 +614,7 @@ class Services(restful.Resource):
         #return r.json()
         return r
 
-api.add_resource(Services, '/clusters/<clusterid>/services'
+api.add_resource(Services, '/clusters/<int:clusterid>/services'
     #, defaults={'clusterid': '1'} )
 )
 
@@ -568,14 +623,9 @@ api.add_resource(Services, '/clusters/<clusterid>/services'
 class Topology(restful.Resource):
     def get(self, clusterid):
         apiLogin()
-        clustername = str(clusterid)
+        host_dict = clusterData(clusterid)
 
-        (resp, content) = webl.request("http://"+ COMPASS_IP + "/api/clusters/"+ clustername + "/hosts", "GET", headers={'X-Auth-Token': token, 'Content-Type':'application/json'})
-        #print "Response ="+str(resp)
-        #print "Content ="+content
-        host_dict = json.loads(content)
         s = ""
-
         for i, v in enumerate(host_dict):
             mgmt_ip = hostMgmtNetIP(host_dict[i]['networks'])
             if mgmt_ip == None:
@@ -584,12 +634,12 @@ class Topology(restful.Resource):
             s = s + str(host_dict[i]['os_installer']['settings']['cobbler_url'].split('/')[2]) + "," + str(host_dict[i]['switch_ip']) + "," + str(host_dict[i]['hostname']) + "@" + mgmt_ip + "\n"
 
         rows = list(csv.reader(s.splitlines()))
-        #print rows
+        print rows
         r = serviceGather(rows)
         #return json.dumps(r)
         return r[0]
 
-api.add_resource(Topology, '/clusters/<clusterid>/topology'
+api.add_resource(Topology, '/clusters/<int:clusterid>/topology'
     #, defaults={'clusterid': '1'} )
 )
 
@@ -597,13 +647,9 @@ api.add_resource(Topology, '/clusters/<clusterid>/topology'
 class ServiceTopology(restful.Resource):
     def get(self, clusterid):
         apiLogin()
-        clusteridname = str(clusterid)
-        (resp, content) = webl.request("http://"+ COMPASS_IP + "/api/clusters/"+ clusteridname + "/hosts", "GET", headers={'X-Auth-Token': token, 'Content-Type':'application/json'})
-        #print "Response ="+str(resp)
-        #print "Content ="+content
-        host_dict = json.loads(content)
-        s = ""
+        host_dict = clusterData(clusterid)
 
+        s = ""
         for i, v in enumerate(host_dict):
             clustername = host_dict[i]['clustername']
             s = s + "Cluster: " + clustername + "," + str(host_dict[i]['hostname']) + "," + "Disk"+ "\n"
@@ -615,7 +661,7 @@ class ServiceTopology(restful.Resource):
                 s = s + "Cluster: " + clustername + "," + str(host_dict[i]['hostname']) + "," + "Role" + "," + str(host_dict[i]['roles'][k]['display_name']) + "\n"
 
         rows = list(csv.reader(s.splitlines()))
-        #print rows
+        print rows
         r = serviceGather(rows)
         #return json.dumps(r)
         return r[0]
@@ -624,7 +670,7 @@ class ServiceTopology(restful.Resource):
         valStr = '[{"id":"Huawei-Lab-C","name":"Huawei-Lab-C","children":[ {"id":"10.145.81.219","name":"10.145.81.219","state":"warning","resource":"services","type":"service","children":[ {"name":"server-1.huawei.com","id":"host1.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-2.huawei.com","id":"host2.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-3.huawei.com","id":"host3.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-4.huawei.com","id":"host4.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-5.huawei.com","id":"host5.huawei.com","state":"warning","resource":"hosts","type":"server", "children":[]}, {"name":"server-6.huawei.com","id":"host6.huawei.com","state":"running","resource":"hosts","type":"server", "children":[]}, {"name":"server-7.huawei.com","id":"host7.huawei.com","state":"critical","resource":"hosts","type":"server", "children":[]}, {"name":"monit-server-1.huawei.com","id":"10_145_81_205","state":"running","resource":"hosts","type":"server", "children":[]}]}]}]'
         return json.loads(valStr)
 
-api.add_resource(ServiceTopology, '/clusters/<clusterid>/servicetopology'
+api.add_resource(ServiceTopology, '/clusters/<int:clusterid>/servicetopology'
     #, defaults={'clusterid': '1'} )
 )
 
@@ -634,10 +680,10 @@ class Overview(restful.Resource):
         apiLogin()
         clusteridname = str(clusterid)
 
-        valStr = '[{ "name": "cluster_summary", "display_name": "Cluster Summary", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Metrics%20Dashboard", "state": "ok" }, { "name": "controller", "display_name": "Controller", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Controller", "state": "error" }, { "name": "alert", "display_name": "Alert", "base_url": "/#/cluster/2/monitoring/alerts", "dash": "", "state": "", "alerts": [{ "type": "critical", "name": "os-keystone" }, { "type": "warning", "name": "os-mq" }, { "type": "warning", "name": "os-db-node" }, { "type": "critical", "name": "os-network" }, { "type": "warning", "name": "os-keystone" }, { "type": "warning", "name": "os-compute2" }] }, { "name": "compute", "display_name": "Compute", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Compute", "state": "ok" }, { "name": "security", "display_name": "Security", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Security", "state": "warning" }, { "name": "database", "display_name": "Database", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Database", "state": "warning" }, { "name": "image", "display_name": "Image", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Image", "state": "warning" }, { "name": "store", "display_name": "Store", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Storage", "state": "ok" }, { "name": "messagebus", "display_name": "Message Bus", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Message%20Bus", "state": "ok" }, { "name": "processes", "display_name": "Processes", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Processes", "state": "ok" }, { "name": "monitoring", "display_name": "Monitoring", "base_url": "/#/cluster/2/monitoring/charts", "dash": "Metrics%20Dashboard", "state": "ok" }, { "name": "users", "display_name": "Users", "base_url": "/#/users", "dash": "", "state": "ok" }]'
+        valStr = '[{ "name": "cluster_summary", "display_name": "Cluster Summary", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Metrics%20Dashboard", "state": "ok" }, { "name": "controller", "display_name": "Controller", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Controller", "state": "error" }, { "name": "alert", "display_name": "Alert", "base_url": "/#/cluster/'+clusteridname+'/monitoring/alerts", "dash": "", "state": "", "alerts": [{ "type": "critical", "name": "os-keystone" }, { "type": "warning", "name": "os-mq" }, { "type": "warning", "name": "os-db-node" }, { "type": "critical", "name": "os-network" }, { "type": "warning", "name": "os-keystone" }, { "type": "warning", "name": "os-compute2" }] }, { "name": "compute", "display_name": "Compute", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Compute", "state": "ok" }, { "name": "security", "display_name": "Security", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Security", "state": "warning" }, { "name": "database", "display_name": "Database", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Database", "state": "warning" }, { "name": "image", "display_name": "Image", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Image", "state": "warning" }, { "name": "store", "display_name": "Store", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Storage", "state": "ok" }, { "name": "messagebus", "display_name": "Message Bus", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Message%20Bus", "state": "ok" }, { "name": "processes", "display_name": "Processes", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Processes", "state": "ok" }, { "name": "monitoring", "display_name": "Monitoring", "base_url": "/#/cluster/'+clusteridname+'/monitoring/charts", "dash": "Metrics%20Dashboard", "state": "ok" }, { "name": "users", "display_name": "Users", "base_url": "/#/users", "dash": "", "state": "ok" }]'
         return json.loads(valStr)
 
-api.add_resource(Overview, '/clusters/<clusterid>/overview'
+api.add_resource(Overview, '/clusters/<int:clusterid>/overview'
     #, defaults={'clusterid': '1'} )
 )
 

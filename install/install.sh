@@ -92,8 +92,8 @@ loadvars()
 }
 
 loadvars NIC "eth0"
-loadvars KAIROSDB_PORT "8080"
-loadvars MONITOR_NODE_IP "10.1.1.1"
+loadvars KAIROSDB_PORT "8088"
+loadvars COMPASS_NODE_IP "10.145.89.1"
 sudo ifconfig $NIC
 if [ $? -ne 0 ]; then
     echo "There is no nic '$NIC' yet"
@@ -180,9 +180,11 @@ sudo sed -e 's|$PythonHome|'$VIRTUAL_ENV'|' -i /var/www/compass_monit/compass_mo
 sudo sed -i "s/\$ipaddr/$ipaddr/g" /etc/compass_monit/setting
 sudo sed -i "s/\$kairosdb_port/$KAIROSDB_PORT/g" /opt/kairosdb/conf/kairosdb.properties
 sudo sed -i "s/\$kairosdb_port/$KAIROSDB_PORT/g" /etc/compass_monit/setting
-sudo sed -i "s/\$monitor_ipaddr/$MONITOR_NODE_IP/g" /etc/compass_monit/setting
+sudo sed -i "s/\$compass_ipaddr/$COMPASS_NODE_IP/g" /etc/compass_monit/setting
 
 deactivate
+
+sudo service kairosdb stop
 
 sudo service cassandra restart
 sudo service cassandra status
