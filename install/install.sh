@@ -182,6 +182,9 @@ sudo sed -i "s/\$kairosdb_port/$KAIROSDB_PORT/g" /opt/kairosdb/conf/kairosdb.pro
 sudo sed -i "s/\$kairosdb_port/$KAIROSDB_PORT/g" /etc/compass_monit/setting
 sudo sed -i "s/\$compass_ipaddr/$COMPASS_NODE_IP/g" /etc/compass_monit/setting
 
+sudo chkconfig cassandra on
+sudo chkconfig kairosdb on
+
 deactivate
 
 sudo service kairosdb stop

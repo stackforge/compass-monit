@@ -399,7 +399,7 @@ class TsQueryBuilder:
         ###repeatStr = '{ "tags": { "cluster": [ "CLUSTERID" ], "host": [ "HOSTNAME" ] }, "name": "METRIC", "group_by": [ { "name":"tag", "tags": ["host"] } ], "aggregators": [{ "name": "avg", "align_sampling": true, "sampling": { "value": "1", "unit": "seconds" } }] }'
         repeatStr = '{ "tags": {}, "name": "METRIC", "group_by": [ { "name":"tag", "tags": ["host"] } ], "aggregators": [{ "name": "avg", "align_sampling": true, "sampling": { "value": "1", "unit": "seconds" } }] }'
 
-        finStr = '],"cache_time": 1, "start_relative": { "value": "1", "unit": "months" } }'
+        finStr = '],"cache_time": 1, "start_relative": { "value": "1", "unit": "hours" } }'
         repeatStr = repeatStr.replace("METRIC", metric).replace("CLUSTERID", clusteridname)
 
         if multi == True:
