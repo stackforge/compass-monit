@@ -1,0 +1,15 @@
+<ul class="draglist">
+    <li ng-repeat="obj in draggableObjects" ng-drop="true" ng-drop-success="onDropComplete($index, $data,$event)">
+        <div class="panel panel-primary" ng-drag="true" ng-drag-data="obj" ng-class="obj.name">
+            <div class="panel-heading">
+		        <h3 class="panel-title">{{obj.title||"untitle"}}</h3>
+		        <span class="glyphicon glyphicon-cog panel-title-right" aria-hidden="true" ng-click="edit()"></span>
+		    </div>
+		    <div class="panel-body">
+                <div class="chartContainer">
+		            <graph graph-data="obj.data" graph-index="{{$index}}" ng-if="obj.chartType == 'graph'"></graph>
+                </div>
+		    </div>
+        </div>
+    </li>   
+</ul>

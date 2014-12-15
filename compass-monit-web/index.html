@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>Compass Monit</title>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0" name="viewport">
+    <link rel="stylesheet" type="text/css" href="assets/css/bootstrap.min.css">
+    <link rel="stylesheet" type="text/css" href="assets/css/compass_monit.css">
+
+    <script data-main="src/main.js" src="vendor/require/require.js"></script>
+
+</head>
+
+<body ng-controller="appController">
+    <button ng-click="open()">Create</button>
+
+    <div class="row text-center">
+        <div ng-include="panelContainers"></div> 
+    </div>
+</body>
+
+
+</html>
+
