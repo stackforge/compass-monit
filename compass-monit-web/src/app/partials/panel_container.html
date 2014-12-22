@@ -1,0 +1,18 @@
+<ul class="draglist">
+    <li ng-repeat="obj in draggableObjects" ng-drop="true" ng-drop-success="onDropComplete($index, $data,$event)">
+        <div class="panel panel-primary" ng-drag="true" ng-drag-data="obj" ng-class="obj.name">
+            <div class="panel-heading">
+		        <h3 class="panel-title">{{obj.title||"untitle"}}</h3>
+                <span class="glyphicon glyphicon-remove panel-title-right" aria-hidden="true" ng-click="removePanel()"></span>
+                <span class="glyphicon glyphicon-fullscreen panel-title-right" aria-hidden="true" ng-click="fullScreen($index)"></span>
+		        <span class="glyphicon glyphicon-cog panel-title-right" aria-hidden="true" ng-click="edit()"></span>
+		    </div>
+		    <div class="panel-body">
+                <div class="chartContainer">
+		            <graph graph-data="obj.data" graph-index="{{$index}}" full-screen="{{enableFullScreen}}" ng-if="obj.chartType == 'graph'"></graph>
+                    <pie-chart graph-data="obj.data" graph-index="{{$index}}" ng-if="obj.chartType == 'pie'"></pie-chart>
+                </div>
+		    </div>
+        </div>
+    </li>   
+</ul>

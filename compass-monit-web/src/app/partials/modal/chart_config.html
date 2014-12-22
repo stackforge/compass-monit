@@ -1,0 +1,15 @@
+<form role="form">
+  <div class="form-group">
+    <label>Name</label>
+    <input type="text" class="form-control" ng-model="panel.title">
+  </div>
+  <div class="form-group">
+    <label for="exampleInputPassword1">Type</label>
+    <select ng-model="panel.chartType" ng-options="type for type in chartTypes">
+    </select>
+  </div>
+  <div class="form-group">
+    <label>Target</label>
+    <input type="text" class="form-control" ng-model="panel.api">
+  </div>
+</form>
