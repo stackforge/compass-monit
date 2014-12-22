@@ -1,0 +1,5 @@
+<button ng-click="closeFullScreen()">close</button>
+<div class="largeChartContainer">
+    <graph graph-data="fullScreenObject.data" graph-index="0" full-screen="{{enableFullScreen}}" ng-if="fullScreenObject.chartType == 'graph'"></graph>
+    <pie-chart graph-data="fullScreenObject.data" graph-index="0" ng-if="fullScreenObject.chartType == 'pie'"></pie-chart>
+</div>
